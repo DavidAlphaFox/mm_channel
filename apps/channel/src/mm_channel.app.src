@@ -1,0 +1,12 @@
+{application, mm_channel,
+ [
+  {description, ""},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { mm_channel_app, []}},
+  {env, []}
+ ]}.
