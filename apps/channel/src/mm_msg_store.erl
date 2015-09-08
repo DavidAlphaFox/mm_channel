@@ -4,48 +4,37 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 14 Jul 2015 by davidalphafox <>
+%%% Created :  8 Sep 2015 by davidalphafox <>
 %%%-------------------------------------------------------------------
--module(mm_channel_client).
+-module(mm_msg_store).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 		 terminate/2, code_change/3]).
--export([test/1]).
+
+-export([write/2,size/1,range/3]).
 
 -define(SERVER, ?MODULE).
 
 -record(state, {
-		  channel,
-		  sync_key
+		  db,
+		  channel
 		 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-test(ChannelName)->
-	SyncKey = <<"0"/utf8>>,
-	Self = self(),
-	{ok,Channel} = mm_channel_manager:start_link(Self,ChannelName),
-	mm_channel_client:start_link(Channel,SyncKey),
-	mm_channel_client:start_link(Channel,SyncKey),
-	mm_channel_client:start_link(Channel,SyncKey),
-	gen_server:cast(Channel,{push,<<"sdsdsd">>}),
-	gen_server:cast(Channel,{push,<<"sdf">>}),
-	gen_server:cast(Channel,{push,<<"324">>}),
-	gen_server:cast(Channel,{push,<<"xcv34">>}),
-	timer:sleep(2000),
-	mm_channel_client:start_link(Channel,SyncKey),
-	Channel.
-	
-				  
-
+write(Store,Msg)->
+	gen_server:call(Store,{write,Msg}).
+size(Store)->
+	gen_server:call(Store,{size}).
+range(Store,Start,End)->
+	gen_server:call(Store,{range,Start,End}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -53,9 +42,8 @@ test(ChannelName)->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Channel,SyncKey) ->
-
-	gen_server:start_link( ?MODULE, [Channel,SyncKey], []).
+start_link(Channel) ->
+	gen_server:start_link(?MODULE, [Channel], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -72,13 +60,10 @@ start_link(Channel,SyncKey) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Channel,SyncKey]) ->
-	Self = self(),
-	gen_server:cast(Channel,{subscribe,SyncKey,Self}),
-	{ok, #state{
-			channel = Channel,
-			sync_key = SyncKey
-		   }}.
+init([Channel]) ->
+	{ok,DB} = eleveldb:open(erlang:binary_to_list(Channel), [{create_if_missing, true}]), 
+	State = #state{db = DB,channel = Channel},
+	{ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -94,6 +79,17 @@ init([Channel,SyncKey]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call({write,Msg},_From,#state{db = DB} = State)->
+	{ok,ID} = new_id(DB),
+	ok = eleveldb:put(DB,ID,Msg,[]),
+	{reply,{ok,ID},State};
+handle_call({size},_From,#state{db = DB} = State)->
+	{ok,ID} = current_id(DB),
+	{reply,{ok,ID},State};
+handle_call({range,Start,End},_From,#state{db = DB} = State)->
+	{ok,Msgs} = range_internal(DB,Start,End), 
+	{reply,{ok,Msgs},State};
+	
 handle_call(_Request, _From, State) ->
 	Reply = ok,
 	{reply, Reply, State}.
@@ -108,6 +104,7 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+	
 handle_cast(_Msg, State) ->
 	{noreply, State}.
 
@@ -121,15 +118,6 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({Channel,NewSyncKey,Messages},#state{channel = Channel} = State )->
-	Self = self(),
-	Fun = fun(I)->
-				  io:format("PID:~p Message:~p~n",[Self,I])
-		  end,
-	lists:foreach(Fun,Messages),
-	io:format("PID:~p,NewSyncKey:~p~n",[Self,NewSyncKey]),
-	gen_server:cast(Channel,{subscribe,NewSyncKey,Self}),
-	{noreply,State#state{sync_key = NewSyncKey}}; 
 handle_info(_Info, State) ->
 	{noreply, State}.
 
@@ -144,7 +132,8 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{db = DB}) ->
+	eleveldb:close(DB),
 	ok.
 
 %%--------------------------------------------------------------------
@@ -161,3 +150,33 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+new_id(DB)->
+	{ok,IDBin} = current_id(DB),
+	ID = erlang:binary_to_integer(IDBin),
+	NewID = erlang:integer_to_binary(ID + 1),
+	ok = eleveldb:put(DB,<<"0">>,NewID,[]),
+	{ok,NewID}.
+	
+current_id(DB)->
+	case eleveldb:get(DB, <<"0">>, []) of
+        {ok, Value} ->			
+			{ok, Value};
+		not_found ->
+			{ok,<<"0">>};
+        {error, Reason} ->
+            {error,Reason}
+	end.
+range_internal(DB,Start,End)->
+	S = erlang:binary_to_integer(Start),
+	Msgs = range_loop(DB,S+1,End,[]),
+	{ok,Msgs}.
+
+range_loop(DB,S,End,L)->
+	Key = erlang:integer_to_binary(S),
+	{ok,Value} = eleveldb:get(DB,Key,[]),
+	if
+		End == Key->
+			lists:reverse([{Key,Value}|L]);
+		true ->
+			range_loop(DB,S + 1,End,[{Key,Value}|L])
+	end.

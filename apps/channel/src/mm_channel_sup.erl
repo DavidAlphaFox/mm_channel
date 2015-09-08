@@ -59,18 +59,7 @@ init([]) ->
 	Restart = permanent,
 	Shutdown = 2000,
 	Type = worker,
-	%AChild = {'AName', {'AModule', start_link, []},
-	%		  Restart, Shutdown, Type, ['AModule']},
-	Pools = mm_channel_config:pools(),
-	lager:log(info,?MODULE,"Pools: ~p~n",[Pools]),
-	PoolChildren = lists:map(fun({Name, SizeArgs, WorkerArgs}) ->                                                   
-                  PoolArgs = [{name, {local, Name}} | SizeArgs],                                                      
-                  poolboy:child_spec(Name, PoolArgs, WorkerArgs)                                            
-              end, Pools),
-	ChannelsManager = {mm_channels_manager,{mm_channels_manager,start_link,[]},
-					 Restart,Shutdown,Type,[mm_channels_manager]},
-	Children =  PoolChildren ++ [ChannelsManager],
-	%Children = [],
+	Children = [],
 	{ok, {SupFlags, Children}}.
 
 %%%===================================================================

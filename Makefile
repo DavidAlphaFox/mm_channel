@@ -9,10 +9,10 @@ deps:
 clean:
 	./rebar clean
 
-compile: deps clean
+compile: deps 
 	./rebar compile
 
-rel:compile
+rel:clean compile
 	./rebar generate
 
 start-dev:

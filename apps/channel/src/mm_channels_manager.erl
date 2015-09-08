@@ -73,7 +73,7 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({new,Name},_From,State) ->
-	Reply = create_channel(Name),
+	Reply = ok,
 	{reply,Reply,State};
 handle_call(_Request, _From, State) ->
 	Reply = ok,
@@ -134,31 +134,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-create_channel(Name)->
-	Fun = fun(C)->
-				  {ok,R1} = eredis:q(C,["SADD","mm_channel:channels",Name]),
-				  case erlang:binary_to_integer(R1) of
-					  1 ->
-						  UUID = Name ++ ":uuid",
-						  {ok,<<"OK">>} = eredis:q(C,["SET",UUID,"0"]),
-						  ok;
-					  0 ->
-						  ok
-				  end
-		  end,			  
-	poolboy:transaction(channels_pool,Fun).
-delete_channel(Name)->
-	Fun = fun(C) ->
-				  UUID = Name ++ ":uuid",
-				  {ok,R1} = eredis:qp(C,[
-										 ["DEL",UUID],
-										 ["SREM","mm_channel:channels",Name]
-										]),
-				  case erlang:binary_to_integer(R1) of
-					  1 ->
-						  ok;
-					  0 ->
-						  fail
-				  end
-		  end,
-	poolboy:transaction(channels_pool,Fun).
