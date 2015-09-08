@@ -40,10 +40,10 @@ handle_cast({subscribe, SyncKey, Subscriber}, State) ->
 handle_cast({push, Msg}, State) ->
 	SyncKey = push(State#state.store,Msg),
     lists:foldr(fun({Ref, Sub}, _) ->
-						Sub ! {self(), SyncKey, [Msg]},
-						erlang:demonitor(Ref)						
+						Sub ! {self(), SyncKey, [Msg]}
+						%erlang:demonitor(Ref)						
         end,undefined, State#state.subscribers),
-    NewState = cache(SyncKey,Msg,State#state{subscribers = []}),
+    NewState = cache(SyncKey,Msg,State),
     {noreply, NewState}.
 
 handle_info({'DOWN', Ref, process, _Pid, _Reason}, State) ->
@@ -105,7 +105,7 @@ pull_messages(SyncKey, Subscriber, State) ->
 			{NewSyncKey,add_subscriber(Subscriber, State#state.subscribers)};
 		_->
             Subscriber ! {self(), NewSyncKey, ReturnMessages},
-            {NewSyncKey,State#state.subscribers}            
+            {NewSyncKey, add_subscriber(Subscriber,State#state.subscribers)}            
     end.
 
 % Checks if the new subscriber pid already has a monitor

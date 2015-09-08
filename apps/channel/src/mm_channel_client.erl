@@ -133,7 +133,7 @@ handle_info({Channel,NewSyncKey,Messages},#state{channel = Channel} = State )->
 	%	  end,
 	%lists:foreach(Fun,Messages),
 	%io:format("PID:~p,NewSyncKey:~p~n",[Self,NewSyncKey]),
-	gen_server:cast(Channel,{subscribe,NewSyncKey,Self}),
+	%gen_server:cast(Channel,{subscribe,NewSyncKey,Self}),
 	{noreply,State#state{sync_key = NewSyncKey}}; 
 handle_info(_Info, State) ->
 	{noreply, State}.
