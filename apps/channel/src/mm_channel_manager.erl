@@ -10,6 +10,10 @@
 		  supervisor,
 		  channel,
 		  store,
+		  cache = [],
+		  cache_count = 0,
+		  max_cache_count = 100,
+		  current_key,
 		  subscribers = []
 		 }).
 
@@ -18,10 +22,12 @@ start_link(ChannelSup, Channel) ->
 
 init([ChannelSup, Channel]) ->
 	{ok,Store} = mm_msg_store:start_link(Channel),
+	CurrentKey = current(Store),
     {ok, #state{
             supervisor = ChannelSup,
             channel = Channel,
-			store = Store}}.
+			store = Store,
+			current_key = CurrentKey}}.
 
 handle_call(_From, _, State) ->
     {noreply, State}.
@@ -37,7 +43,8 @@ handle_cast({push, Msg}, State) ->
 						Sub ! {self(), SyncKey, [Msg]},
 						erlang:demonitor(Ref)						
         end,undefined, State#state.subscribers),
-    {noreply, State#state{subscribers = []}}.
+    NewState = cache(SyncKey,Msg,State#state{subscribers = []}),
+    {noreply, NewState}.
 
 handle_info({'DOWN', Ref, process, _Pid, _Reason}, State) ->
 	{noreply, State#state{ subscribers = proplists:delete(Ref, State#state.subscribers)}};
@@ -51,10 +58,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-sync_key_current(Store)->
+current(Store)->
 	{ok,Size} = mm_msg_store:size(Store),
 	Size.
-	
+
 pull(Store,SyncKey,CurrentKey)->
 	{ok,Msgs} = mm_msg_store:range(Store,SyncKey,CurrentKey),
 	Msgs.
@@ -62,23 +69,37 @@ pull(Store,SyncKey,CurrentKey)->
 push(Store,Msg)->
 	{ok,Key} = mm_msg_store:write(Store,Msg),
 	Key.
+cache(SyncKey,Msg,
+	#state{cache = Cache,cache_count = Count,max_cache_count = Max} = State)->
+	if 
+		Count < Max ->
+			State#state{cache = lists:append(Cache,[Msg]),
+			cache_count = Count + 1,current_key = SyncKey};
+		true ->
+			[_H|T] = Cache,
+			State#state{cache = lists:append(T,[Msg]),current_key = SyncKey}
+	end.
 
-newer_messages(Store,SyncKey) ->
-	CurrentKey = sync_key_current(Store),
+
+pull_cache(SyncKey,State)->
+	CurrentSeq = erlang:binary_to_integer(State#state.current_key),
+	CachedSeq = CurrentSeq - State#state.cache_count,
 	SyncSeq = erlang:binary_to_integer(SyncKey),
-	CurrentSeq = erlang:binary_to_integer(CurrentKey),
-	Messages = if
-				   CurrentSeq == SyncSeq ->
-					   [];
-				   CurrentSeq < SyncSeq ->
-					   [];
-				   true->
-					   pull(Store,SyncKey,CurrentKey)
-			   end,
-	{CurrentKey,Messages}.
-
+	Messages = if 
+			(SyncSeq >= CachedSeq) and (SyncSeq < CurrentSeq) ->
+				Diff = SyncSeq - CachedSeq,
+				{_H,T} = lists:split(Diff,State#state.cache),
+				T;
+			SyncSeq < CachedSeq ->
+				Older = pull(State#state.store,SyncKey,erlang:integer_to_binary(CachedSeq)),
+				lists:append(Older,State#state.cache);
+			true ->
+				[]
+		end,
+	{State#state.current_key,Messages}.	
+	
 pull_messages(SyncKey, Subscriber, State) ->
-	{NewSyncKey,ReturnMessages} = newer_messages(State#state.store,SyncKey),
+	{NewSyncKey,ReturnMessages} = pull_cache(SyncKey,State),
     case  erlang:length(ReturnMessages) of
 		0 ->
 			{NewSyncKey,add_subscriber(Subscriber, State#state.subscribers)};

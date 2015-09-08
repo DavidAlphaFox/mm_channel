@@ -1,7 +1,7 @@
 .PHONY: deps
 .PHONY: rel
 
-all:deps compile
+all:clean rel
 
 deps:
 	./rebar get-deps
@@ -12,11 +12,5 @@ clean:
 compile: deps 
 	./rebar compile
 
-rel:clean compile
+rel: compile
 	./rebar generate
-
-start-dev:
-	./rel/dog/bin/dog console
-
-start:
-	./rel/dog/bin/dog start

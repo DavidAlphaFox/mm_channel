@@ -16,7 +16,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 		 terminate/2, code_change/3]).
--export([test/1]).
+-export([new_channel/2,flush_channel/3,flush_channel/2]).
 
 -define(SERVER, ?MODULE).
 
@@ -29,22 +29,27 @@
 %%% API
 %%%===================================================================
 
-test(ChannelName)->
+new_channel(ChannelName,Count)->
 	SyncKey = <<"0"/utf8>>,
 	Self = self(),
 	{ok,Channel} = mm_channel_manager:start_link(Self,ChannelName),
-	mm_channel_client:start_link(Channel,SyncKey),
-	mm_channel_client:start_link(Channel,SyncKey),
-	mm_channel_client:start_link(Channel,SyncKey),
-	gen_server:cast(Channel,{push,<<"sdsdsd">>}),
-	gen_server:cast(Channel,{push,<<"sdf">>}),
-	gen_server:cast(Channel,{push,<<"324">>}),
-	gen_server:cast(Channel,{push,<<"xcv34">>}),
-	timer:sleep(2000),
-	mm_channel_client:start_link(Channel,SyncKey),
+	new_channel_client(Channel,SyncKey,Count),
 	Channel.
-	
-				  
+new_channel_client(_Channel,_SyncKey,0)->
+	ok;
+new_channel_client(Channel,SyncKey,Count)->
+	mm_channel_client:start_link(Channel,SyncKey),
+	new_channel_client(Channel,SyncKey,Count-1).
+flush_channel(_Channel,_Count,0)->
+	ok;
+flush_channel(Channel,Count,ProcessCount)->
+	spawn(mm_channel_client, flush_channel, [Channel,Count]),
+	flush_channel(Channel,Count,ProcessCount-1).
+flush_channel(_Channel,0)->
+	ok;
+flush_channel(Channel,Count)->	
+	gen_server:cast(Channel,{push,<<"a">>}),
+	flush_channel(Channel,Count -1).				  
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -123,11 +128,11 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 handle_info({Channel,NewSyncKey,Messages},#state{channel = Channel} = State )->
 	Self = self(),
-	Fun = fun(I)->
-				  io:format("PID:~p Message:~p~n",[Self,I])
-		  end,
-	lists:foreach(Fun,Messages),
-	io:format("PID:~p,NewSyncKey:~p~n",[Self,NewSyncKey]),
+	%Fun = fun(I)->
+	%			  io:format("PID:~p Message:~p~n",[Self,I])
+	%	  end,
+	%lists:foreach(Fun,Messages),
+	%io:format("PID:~p,NewSyncKey:~p~n",[Self,NewSyncKey]),
 	gen_server:cast(Channel,{subscribe,NewSyncKey,Self}),
 	{noreply,State#state{sync_key = NewSyncKey}}; 
 handle_info(_Info, State) ->

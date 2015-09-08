@@ -59,7 +59,10 @@ init([]) ->
 	Restart = permanent,
 	Shutdown = 2000,
 	Type = worker,
-	Children = [],
+	BackgroundGC = {mm_background_gc, 
+		{mm_background_gc, start_link, []},
+		Restart, Shutdown, Type, [mm_background_gc]},
+	Children = [BackgroundGC],
 	{ok, {SupFlags, Children}}.
 
 %%%===================================================================
